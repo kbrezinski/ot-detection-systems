@@ -9,7 +9,7 @@ description = "To be added..."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "numpy>=2.4.4",
+    "numpy>=2.4.6",
     "pytest>=9.0.3",
     "torch>=2.11.0",
 ]
