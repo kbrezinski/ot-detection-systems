@@ -1,0 +1,37 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Project
+
+`provenance-detection-systems` (import name `provdetect`) is an early-stage PyTorch project; the README is only a title and `pyproject.toml` has a placeholder description. So far only the runtime/reproducibility scaffolding exists: `src/provdetect/config.py` and `paths.py`. `src/provdetect/core/` is an empty package and the root `main.py` is a hello-world stub.
+
+Python 3.12 (`.python-version`), managed with **uv**; build backend is hatchling with a `src/` layout (`packages = ["src/provdetect"]`).
+
+## Commands
+
+```bash
+uv sync --group dev                      # install runtime + dev deps (CI uses --locked)
+uv run pytest                            # all tests (testpaths=tests, -q, importlib import mode)
+uv run pytest tests/test_config.py::test_seed_everything_repeats_python_numpy_and_torch_streams   # single test
+uv run ruff check . --fix                # lint
+uv run ruff format .                     # format
+uv run codespell . --skip="./.git,./.venv,./dist,./build,./uv.lock"   # spelling (CI runs this too)
+uv build                                 # build wheel/sdist (CI does this)
+pre-commit run --all-files               # end-of-file/whitespace, ruff, codespell
+```
+
+CI (`.github/workflows/`) runs ruff check, `ruff format --check`, pytest, `uv build`, and an import smoke test on ubuntu/windows/macos; codespell and a lychee link check (README and `**/*.html`) run as separate workflows. Ruff has no config in `pyproject.toml`, so defaults apply.
+
+## Architecture
+
+**Determinism is a first-class concern.** Reproducibility is enforced in two places that must stay consistent:
+
+- `config.py` — `RuntimeConfig` (frozen, slotted dataclass) holds seed/device/determinism knobs. `apply_runtime_config()` seeds Python/NumPy/torch via `seed_everything()` and returns a *new* config with `device="auto"` resolved to `"cuda"`/`"cpu"`. `seed_everything()` calls `torch.use_deterministic_algorithms(...)`, so any torch op lacking a deterministic implementation raises.
+- `tests/conftest.py` — an autouse fixture reseeds every RNG and turns on deterministic algorithms for each test. It also sets `PYTHONHASHSEED` and `CUBLAS_WORKSPACE_CONFIG` at the top of the file, *before* importing torch; these must be set before torch initializes CUDA backends, so keep them above the `import torch` line.
+
+`seed_everything()` takes `cudnn_benchmark` and `cudnn_deterministic` as well; `cudnn_deterministic=None` falls back to the `deterministic` arg. `apply_runtime_config()` forwards all the `RuntimeConfig` knobs.
+
+**Paths** — `paths.py` defines the data/models/artifacts directory constants (`RAW_DATA_DIR`, `CHECKPOINTS_DIR`, `LOGS_DIR`, …) and `ensure_directories()` to create them. `_BASE_DIR` is the repo root (`parents[2]` from `src/provdetect/paths.py`). That only holds for an editable/source checkout; from an installed wheel it would point into `site-packages`' parent. `.gitignore` ignores `data/`, `models/`, and `artifacts/`.
+
+Tests that touch device selection monkeypatch `config_mod.torch.cuda.is_available` rather than requiring a GPU.

@@ -1,6 +1,7 @@
 from pathlib import Path
 
-_BASE_DIR = Path(__file__).resolve().parent.parent
+# src/provdetect/paths.py -> repository root
+_BASE_DIR = Path(__file__).resolve().parents[2]
 
 # Data
 DATA_DIR = _BASE_DIR / "data"

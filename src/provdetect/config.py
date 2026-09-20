@@ -31,7 +31,13 @@ def resolve_device(device: DeviceName = "auto") -> DeviceName:
     return device
 
 
-def seed_everything(seed: int, deterministic: bool = True) -> None:
+def seed_everything(
+    seed: int,
+    deterministic: bool = True,
+    cudnn_benchmark: bool = False,
+    cudnn_deterministic: bool | None = None,
+) -> None:
+    # cudnn_deterministic defaults to `deterministic` when not given.
 
     # Random seeds
     random.seed(seed)
@@ -39,8 +45,10 @@ def seed_everything(seed: int, deterministic: bool = True) -> None:
     torch.manual_seed(seed)
 
     # cuDNN settings matter for reproducibility on CUDA.
-    torch.backends.cudnn.benchmark = False
-    torch.backends.cudnn.deterministic = deterministic
+    torch.backends.cudnn.benchmark = cudnn_benchmark
+    torch.backends.cudnn.deterministic = (
+        deterministic if cudnn_deterministic is None else cudnn_deterministic
+    )
 
     # Broader deterministic behavior across PyTorch ops.
     torch.use_deterministic_algorithms(deterministic)
@@ -48,7 +56,12 @@ def seed_everything(seed: int, deterministic: bool = True) -> None:
 
 def apply_runtime_config(config: RuntimeConfig) -> RuntimeConfig:
 
-    seed_everything(config.seed, deterministic=config.deterministic)
+    seed_everything(
+        config.seed,
+        deterministic=config.deterministic,
+        cudnn_benchmark=config.cudnn_benchmark,
+        cudnn_deterministic=config.cudnn_deterministic,
+    )
 
     return RuntimeConfig(
         seed=config.seed,

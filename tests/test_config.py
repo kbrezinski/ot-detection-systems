@@ -52,6 +52,21 @@ def test_seed_everything_repeats_python_numpy_and_torch_streams():
     assert torch.equal(torch_first, torch_second)
 
 
+def test_seed_everything_cudnn_deterministic_defaults_to_deterministic():
+    seed_everything(1337, deterministic=True)
+    assert torch.backends.cudnn.deterministic is True
+
+    seed_everything(1337, deterministic=False)
+    assert torch.backends.cudnn.deterministic is False
+
+
+def test_apply_runtime_config_applies_cudnn_settings():
+    apply_runtime_config(RuntimeConfig(cudnn_benchmark=True, cudnn_deterministic=False))
+
+    assert torch.backends.cudnn.benchmark is True
+    assert torch.backends.cudnn.deterministic is False
+
+
 def test_apply_runtime_config_normalizes_auto_device(monkeypatch):
     monkeypatch.setattr(config_mod.torch.cuda, "is_available", lambda: False)
 
