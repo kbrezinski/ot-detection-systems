@@ -19,6 +19,7 @@ uv run ruff format .                     # format
 uv run codespell . --skip="./.git,./.venv,./dist,./build,./uv.lock"   # spelling (CI runs this too)
 uv build                                 # build wheel/sdist (CI does this)
 pre-commit run --all-files               # end-of-file/whitespace, ruff, codespell
+uv run python scripts/run_gotham_pipeline.py   # clean + label + prepare the CSVs in data/ (see below)
 ```
 
 CI (`.github/workflows/`) runs ruff check, `ruff format --check`, pytest, `uv build`, and an import smoke test on ubuntu/windows/macos; codespell and a lychee link check (README and `**/*.html`) run as separate workflows. Ruff has no config in `pyproject.toml`, so defaults apply.
@@ -35,3 +36,5 @@ CI (`.github/workflows/`) runs ruff check, `ruff format --check`, pytest, `uv bu
 **Paths** — `paths.py` defines the data/models/artifacts directory constants (`RAW_DATA_DIR`, `CHECKPOINTS_DIR`, `LOGS_DIR`, …) and `ensure_directories()` to create them. `_BASE_DIR` is the repo root (`parents[2]` from `src/provdetect/paths.py`). That only holds for an editable/source checkout; from an installed wheel it would point into `site-packages`' parent. `.gitignore` ignores `data/`, `models/`, and `artifacts/`.
 
 Tests that touch device selection monkeypatch `config_mod.torch.cuda.is_available` rather than requiring a GPU.
+
+**Gotham labelling pipeline** — `scripts/run_gotham_pipeline.py` runs feature cleaning, labelling and per-device data preparation on the tshark feature CSVs in `data/benign` and `data/malicious/<event>` (inputs are git-ignored). It clones [gotham-network-packet-labeller](https://github.com/othmbela/gotham-network-packet-labeller) into the git-ignored `third_party/` at a pinned commit and reuses its `Labeller`/`FeatureCleaner` and metadata rather than running its scripts, which at that commit crash or silently mislabel (glob-string bug in `run_cleaning.py`, `network-scanning` looks for a nonexistent metadata file, prefix-glob device matching merges `-1` with `-10`..`-19`). Non-obvious behaviour: the benign CSVs in this copy of the dataset hold a *different* device's traffic than their names say, so benign files are assigned to a device by the IP addresses in their traffic (audit trail: `data/benign_file_mapping.json`); malicious files are trusted as named. Outputs go to `data/labelled/`, `data/processed/<device>.csv` and `data/cleaning_report.json`; reruns skip existing outputs unless `--force`. Files are read in chunks, and cleaning samples each file down to ~200k rows (`--clean-max-rows`), because the largest CSV is >1 GB.

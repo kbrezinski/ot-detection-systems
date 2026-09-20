@@ -222,3 +222,6 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Third-party code cloned by scripts/run_gotham_pipeline.py
+third_party/
