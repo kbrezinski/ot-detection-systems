@@ -1,66 +1,152 @@
-# provenance-detection-systems
+# Metropolis OT Detection Systems
 
 [![CI](https://github.com/kbrezinski/ot-detection-systems/actions/workflows/ci.yml/badge.svg)](https://github.com/kbrezinski/ot-detection-systems/actions/workflows/ci.yml)
 
-An early-stage PyTorch project for provenance detection. The importable package is `provdetect`.
+Metropolis is an early-stage, GNS3-based water-treatment OT/ICS testbed and a research codebase for studying network traffic and provenance-based detection. Its architecture is an adaptation inspired by the [Gotham IoT Testbed](https://github.com/xsaga/gotham-iot-testbed): Metropolis keeps the reusable-device, router/switch, scenario, and data-generation ideas, while replacing Gotham's city-scale IoT layout with a Purdue-informed water-treatment network.
 
-> **Status:** under active development. The project goals, methods and results will be documented here as they take shape. So far the repository contains the reproducible-runtime scaffolding that later work builds on.
+Metropolis is its own architecture. Gotham scripts and tooling may be reused where their assumptions fit, but Gotham's topology, IPs, node names, device models, and attack targets do not automatically match Metropolis. This repository is under active development; the sections below distinguish current artifacts from work still needed for an end-to-end run.
 
-## Requirements
+The reference implementation is the [Gotham repository](https://github.com/xsaga/gotham-iot-testbed), described in [“Gotham Testbed: A Reproducible IoT Testbed for Security Experiments and Dataset Generation”](https://doi.org/10.1109/TDSC.2023.3247166). If you build on Gotham's work, follow its license and cite the paper as appropriate.
 
-- Python 3.12 or newer
-- [uv](https://docs.astral.sh/uv/) for environment and dependency management
+## What is in the repository
 
-Runtime dependencies are `numpy` and `torch`. `uv.lock` pins exact versions.
+- **Metropolis network drafts:** VyOS router scripts under `router/` and GNS3 switch/VLAN specifications under `switch/`.
+- **Reusable emulated devices:** Dockerfiles and Python applications under `devices/`, including Modbus TCP PLC/RTU models, MQTT telemetry and broker components, SCADA/HMI simulators, a historian collector, and an engineering workstation image.
+- **Dataset organization:** `datasets/water_treatment_v1/` holds the planned topology, device instances, protocol profiles, scenarios, metadata, and capture locations. `device_instances/initial_devices.yaml` is an initial inventory proposal.
+- **Research package:** `src/provdetect/` currently provides Python runtime and reproducibility scaffolding. It is not yet connected to traffic capture, dataset labeling, or model training for Metropolis.
+- **Existing Gotham data pipeline:** `scripts/run_gotham_pipeline.py` is for processing the separately downloaded Gotham dataset in `data/`; it does not build or run the Metropolis GNS3 network.
 
-## Getting started
+## Network design
+
+The plan uses separate sites and routed zones, following Purdue concepts as a guide:
+
+| Purdue-style area | Metropolis role | Planned networks |
+|---|---|---|
+| Levels 0-1 | Sensors, actuators, PLCs, and RTUs in process cells | `10.20.10.0/24` through `10.20.15.0/24` |
+| Level 2 | HMIs and local control access | `10.20.50.0/24` through `10.20.53.0/24` |
+| Level 3 | SCADA, engineering, historian, MQTT, and OT services | `10.20.20.0/24` through `10.20.23.0/24`, plus `10.20.30.0/24` |
+| Level 3.5 | OT DMZ | `10.20.40.0/24` |
+| Level 4 | Simulated enterprise network | `10.30.10.0/24` |
+| Lab-only test zone | Attack-generation hosts for controlled experiments | `10.99.10.0/24` |
+| Inter-site transport | Simulated WAN underlay; remote sites have reserved IPsec overlay ranges | `172.31.255.0/24`; overlays reserved under `10.20.254.0/24` |
+
+The topology has a treatment plant, a raw-water lift station, and a reservoir/booster station. Routers and switches are organized by backbone and location, similar to Gotham's site-oriented network organization. See the [router scripts](router/), [switch specifications](switch/README.md), and [v1 dataset notes](datasets/water_treatment_v1/README.md) for details.
+
+The current router scripts provide draft routing and VLAN interfaces. Firewall rules are not configured, the simulated WAN is not encrypted with IPsec, and the attack-test network is not yet restricted from OT networks. The scripts contain TODO reminders for that work. Do not treat the current routing draft as a secured network.
+
+## Device models and protocols
+
+The initial emulated device set focuses on Modbus TCP and MQTT:
+
+| Role | Current model behavior |
+|---|---|
+| PLC / RTU | A small Modbus TCP server with example process registers, a heartbeat, and writable pump/valve coils |
+| Field sensor | Publishes periodic JSON MQTT telemetry |
+| MQTT broker | Mosquitto broker listening on TCP 1883 |
+| SCADA | Polls a Modbus TCP controller and publishes a status snapshot over MQTT |
+| HMI | Publishes a periodic example setpoint over MQTT |
+| Historian | Subscribes to MQTT topics and logs received messages to its console |
+| Engineering workstation | Container with Python Modbus/MQTT libraries for lab interaction |
+
+These are lightweight protocol simulators, not vendor device firmware. The sample process values are not connected by a hydraulic model, the HMI setpoint is not yet wired to PLC control logic, and the MQTT broker currently permits anonymous connections. See [devices/README.md](devices/README.md) for image build commands, environment settings, topics, and register definitions. Authentication, MQTT ACLs/TLS, realistic process behavior, and complete cell-by-cell register maps are future work.
+
+## Running Metropolis on an Ubuntu GNS3 server
+
+The intended deployment host is Ubuntu with Docker and a GNS3 server available to the GNS3 client. The following describes the planned workflow; **end-to-end startup is not automated yet**.
+
+### 1. Prepare the host and repository
+
+Install and configure Docker and GNS3 using their official instructions, then clone this repository onto the machine that builds or runs the GNS3 Docker nodes:
 
 ```bash
 git clone https://github.com/kbrezinski/ot-detection-systems.git
 cd ot-detection-systems
-uv sync --group dev
 ```
 
-Run the tests to check the setup:
+Confirm Docker can build and run containers on the GNS3 compute host. For a remote GNS3 server, build or transfer the images to the Docker host used by that server; images available only on your desktop will not automatically exist on the server.
+
+### 2. Build the device images
+
+From the repository root, run the image build commands in [devices/README.md](devices/README.md). For example:
 
 ```bash
+docker build -f devices/controllers/plc/Dockerfile -t metropolis/controller:dev .
+docker build -f devices/services/mqtt_broker/Dockerfile -t metropolis/mqtt-broker:dev .
+docker build -f devices/field/sensors/Dockerfile -t metropolis/mqtt-sensor:dev .
+docker build -f devices/operations/scada/Dockerfile -t metropolis/scada:dev .
+docker build -f devices/operations/hmi/Dockerfile -t metropolis/hmi:dev .
+docker build -f devices/operations/historian/Dockerfile -t metropolis/historian:dev .
+docker build -f devices/operations/engineering_workstation/Dockerfile -t metropolis/engineering:dev .
+```
+
+These create local Docker images. They do not create GNS3 templates or place nodes in a project.
+
+### 3. Create the GNS3 templates and topology
+
+In GNS3, create Docker templates that reference the built images, import/configure the VyOS appliance, then add the router, switch, and device nodes to a project. Configure the switch VLAN membership and trunk ports according to `switch/`; apply the router scripts to the matching VyOS nodes after checking interface numbering.
+
+Use `datasets/water_treatment_v1/device_instances/initial_devices.yaml` as a proposed node inventory. It is documentation for now: **GNS3 does not read this YAML, set the listed IP addresses, or apply its environment variables.** Static addressing, per-node environment configuration, GNS3 templates, topology creation, router startup, and switch setup still need to be connected through manual configuration or future automation. In particular, the container models do not yet include a common network-initialization entrypoint that applies the inventory's IP/gateway fields.
+
+### 4. Start and check the lab
+
+Once node network settings and links have been configured, start the broker and controller before the MQTT clients and SCADA node. Check each node's console for startup or connection messages, confirm routing between the intended subnets, then capture traffic on selected GNS3 links. Record the topology, IPs, image versions, scenarios, capture points, and timestamps under the matching `datasets/<name>_v<n>/` directory.
+
+This sequence is a deployment plan, not a verified one-command runbook. Container image builds have not yet been validated on an Ubuntu GNS3 server, and the repository does not yet contain a Metropolis template/topology builder or capture/scenario orchestrator.
+
+## Reusing Gotham scripts and tools
+
+Gotham's reusable patterns include Docker-based device templates, GNS3 API helpers, router configuration scripts, topology construction, scenario orchestration, and packet capture. Metropolis is designed to adopt compatible parts of that workflow while using its own site layout and OT device models.
+
+Gotham scripts that automate attacks or scenarios are usually tied to assumptions such as a Gotham project name, node-name patterns, target addresses, service ports, credentials, and installed GNS3 helper functions. Before using one with Metropolis, update those values to the Metropolis project and node inventory, verify that the target service exists in the selected subnet, and make sure the required route and lab firewall policy are in place. A Gotham MQTT attack script, for example, can only target a Metropolis MQTT broker if its configured address, port, and test credentials match that broker and the attack host can reach it. Attack scripts are not plug-and-play across the two topologies.
+
+The current `scripts/run_gotham_pipeline.py` serves a different purpose: it runs feature cleaning, labeling, and preparation on the existing Gotham CSV files. It is separate from GNS3 scenario scripts and does not yet process Metropolis captures.
+
+## Dataset layout
+
+Each experiment should have a versioned dataset folder, for example `datasets/water_treatment_v1/`:
+
+```text
+datasets/water_treatment_v1/
+├── topology/          # Sites, subnets, routers, switches, and links
+├── device_instances/  # Named nodes, addresses, roles, and image settings
+├── protocol_profiles/ # Modbus maps, MQTT topics, and security settings
+├── scenarios/         # Normal operation and individual experiments
+├── metadata/           # Capture points, labels, timestamps, and run details
+└── captures/           # PCAPs; generated capture files are Git-ignored
+```
+
+Keep reusable device behavior under `devices/` and per-run assignments under the versioned dataset directory. Create a new dataset version rather than silently changing the configuration associated with an existing capture set.
+
+## Python research package
+
+The `provdetect` package is managed with Python 3.12+ and [uv](https://docs.astral.sh/uv/):
+
+```bash
+uv sync --group dev
 uv run pytest
 ```
 
-## Reproducibility
-
-Deterministic behaviour is a design goal. `provdetect.config` provides:
-
-- `RuntimeConfig`, a frozen dataclass holding the seed, device and determinism/cuDNN settings.
-- `apply_runtime_config(config)`, which seeds Python, NumPy and PyTorch, applies the cuDNN settings, and returns the config with `device="auto"` resolved to `"cuda"` or `"cpu"`.
-
-```python
-from provdetect.config import RuntimeConfig, apply_runtime_config
-
-config = apply_runtime_config(RuntimeConfig(seed=1337, device="auto"))
-print(config.device)  # "cuda" if available, otherwise "cpu"
-```
-
-Deterministic mode calls `torch.use_deterministic_algorithms(True)`, so a PyTorch operation without a deterministic implementation raises an error instead of silently running non-deterministically. For CUDA runs, set `CUBLAS_WORKSPACE_CONFIG=:4096:8` in the environment before PyTorch starts, as `tests/conftest.py` does.
+The package currently contains reproducibility/runtime setup and project path helpers; data ingestion, feature extraction for Metropolis traffic, provenance modeling, and evaluation workflows remain under development.
 
 ## Project layout
 
 ```text
-src/provdetect/     Package source (config, paths, core)
-tests/              Pytest suite
-main.py             Placeholder entry point
+router/                 VyOS router configuration drafts
+switch/                 GNS3 switch/VLAN configuration specifications
+devices/                Dockerfiles and Python-based device simulators
+datasets/               Versioned topology, instances, scenarios, and captures
+scripts/                Dataset processing utilities (currently Gotham data)
+src/provdetect/         Python research package
+tests/                  Tests for the current Python package
 ```
-
-`provdetect.paths` defines the locations used for data (`data/`), models (`models/`) and run artifacts (`artifacts/`) at the repository root. `ensure_directories()` creates them. These directories are git-ignored.
 
 ## Development
 
 ```bash
-uv run pytest                 # run the tests
-uv run ruff check . --fix     # lint
-uv run ruff format .          # format
-uv run codespell .            # spell check
-pre-commit install            # run the checks automatically on commit
+uv run ruff check .
+uv run ruff format --check .
+uv run pytest
+uv build
 ```
 
-GitHub Actions runs lint, format check, tests, a package build and an import smoke test on Linux, Windows and macOS. Spelling and link checks run in their own workflows.
+GitHub Actions runs lint, formatting checks, tests, package builds, and import checks for the Python package. These CI checks do not build or start the GNS3 Docker testbed.

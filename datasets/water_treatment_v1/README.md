@@ -4,7 +4,7 @@ This directory holds the topology, device instances, protocol profiles, scenario
 and metadata for one version of the water-treatment testbed dataset.
 
 - `topology/` describes sites, subnets, links, routers, and switches.
-- `device_instances/` assigns addresses and roles to reusable models from `devices/`.
+- `device_instances/` assigns addresses and roles to reusable models from `devices/`; `initial_devices.yaml` contains the first proposed PLC/RTUs, sensor, MQTT broker, SCADA, historian, and HMI nodes.
 - `protocol_profiles/` records protocol versions, endpoints, topics/register maps,
   and security settings.
 - `scenarios/` describes normal operations and each experiment or attack run.
