@@ -4,7 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-`provenance-detection-systems` (import name `provdetect`) is an early-stage PyTorch project; the README is only a title and `pyproject.toml` has a placeholder description. So far only the runtime/reproducibility scaffolding exists: `src/provdetect/config.py` and `paths.py`. `src/provdetect/core/` is an empty package and the root `main.py` is a hello-world stub.
+`provenance-detection-systems` (import name `provdetect`) is an early-stage PyTorch project for detecting provenance/attacks in OT (operational technology) network traffic; `pyproject.toml` still has a placeholder `description`. Two things coexist in this repo:
+
+- The Python package, where so far only runtime/reproducibility scaffolding exists: `src/provdetect/config.py` and `paths.py`. `src/provdetect/core/` is an empty package and the root `main.py` is a hello-world stub.
+- A synthetic OT testbed ("Metropolis", a GNS3 water-treatment network) plus a versioned dataset layout under `datasets/` that will supply the labelled traffic `provdetect` eventually trains on — see **Metropolis testbed & dataset layout** below. This is config/spec authoring, not Python.
 
 Python 3.12 (`.python-version`), managed with **uv**; build backend is hatchling with a `src/` layout (`packages = ["src/provdetect"]`).
 
@@ -38,3 +41,12 @@ CI (`.github/workflows/`) runs ruff check, `ruff format --check`, pytest, `uv bu
 Tests that touch device selection monkeypatch `config_mod.torch.cuda.is_available` rather than requiring a GPU.
 
 **Gotham labelling pipeline** — `scripts/run_gotham_pipeline.py` runs feature cleaning, labelling and per-device data preparation on the tshark feature CSVs in `data/benign` and `data/malicious/<event>` (inputs are git-ignored). It clones [gotham-network-packet-labeller](https://github.com/othmbela/gotham-network-packet-labeller) into the git-ignored `third_party/` at a pinned commit and reuses its `Labeller`/`FeatureCleaner` and metadata rather than running its scripts, which at that commit crash or silently mislabel (glob-string bug in `run_cleaning.py`, `network-scanning` looks for a nonexistent metadata file, prefix-glob device matching merges `-1` with `-10`..`-19`). Non-obvious behaviour: the benign CSVs in this copy of the dataset hold a *different* device's traffic than their names say, so benign files are assigned to a device by the IP addresses in their traffic (audit trail: `data/benign_file_mapping.json`); malicious files are trusted as named. Outputs go to `data/labelled/`, `data/processed/<device>.csv` and `data/cleaning_report.json`; reruns skip existing outputs unless `--force`. Files are read in chunks, and cleaning samples each file down to ~200k rows (`--clean-max-rows`), because the largest CSV is >1 GB.
+
+**Metropolis testbed & dataset layout** — four top-level directories describe a simulated OT/ICS network ("Metropolis", a water-treatment plant) built in GNS3, independent of the Gotham pipeline above:
+
+- `router/backbone/` and `router/locations/` — VyOS 1.3 `vbash` scripts (`set interfaces ...`, `commit`, `save`) for each GNS3 router, one per network zone (plant, OT core, OT/DMZ boundary, WAN hub, reservoir, raw-water). Each script's header comment documents its GNS3 interface map and which VLANs/subnets it must carry; routing between zones is via static routes only, and several scripts carry `TODO(Metropolis)` notes that inter-zone firewall policy is not yet applied — static routes provide reachability, not restriction.
+- `switch/` — Markdown specs (not executable), read together with `switch/README.md`'s port-mapping table, describing the VLAN plan for each GNS3 switch appliance. Port labels like `router-uplink` are roles, not literal GNS3 port numbers, filled in after cabling.
+- `devices/` — reusable, currently-empty device-model scaffolding (`controllers/{plc,rtu}`, `field/{sensors,actuators}`, `operations/{scada,hmi,historian,engineering_workstation}`, `services/{mqtt_broker,logging,time}`), meant to be referenced by device instances rather than duplicated per dataset.
+- `datasets/<name>_v<n>/` (e.g. `datasets/water_treatment_v1/`) — one versioned dataset per testbed run, with `topology/` (sites/subnets/links/routers/switches), `device_instances/` (addresses/roles assigned from `devices/`), `protocol_profiles/`, `scenarios/` (normal ops + each attack/experiment run), and `metadata/` (labels, capture points, timestamps). `captures/` holds generated PCAPs and is git-ignored (`datasets/*/captures/**`, `.gitkeep` tracked); a new dataset version gets its own directory rather than mutating an existing one.
+
+None of this is wired into `provdetect` yet; these directories currently hold specs/scaffolding (many `.gitkeep` placeholders) rather than generated data.

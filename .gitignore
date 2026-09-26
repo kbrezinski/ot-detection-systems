@@ -15,6 +15,10 @@ data/
 models/
 artifacts/
 
+# Generated packet captures can be large; keep dataset definitions and metadata tracked.
+datasets/*/captures/**
+!datasets/*/captures/.gitkeep
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
